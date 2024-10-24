@@ -1,0 +1,152 @@
+# SonarQube Playbook
+
+# This playbook installs and configures Java, Maven, and SonarQube, 
+# sets up environment variables, manages file permissions, 
+# and starts the SonarQube service on the target machine.
+
+# TASKS INCLUDED IN THIS PLAYBOOK:
+# 1. Create a sonar user with a home directory.
+# 2. Add the sonar user to the sudoers file for passwordless sudo.
+# 3. Download and install Java 17.
+# 4. Download and install Maven 3.8.8.
+# 5. Install the unzip package (dependency for working with compressed files).
+# 6. Download and install SonarQube 9.7.1.
+# 7. Move installed directories to simpler, cleaner paths for Java, Maven, and SonarQube.
+# 8. Add environment variables for Java, Maven, and SonarQube in /etc/profile.
+# 9. Source /etc/profile to load environment variables in the current session.
+# 10. Set the correct ownership and permissions for the SonarQube installation.
+# 11. Modify the SonarQube start script to ensure it runs as the sonar user.
+# 12. Copy the SonarQube systemd service file to the server.
+# 13. Enable and start the SonarQube service via systemd.
+# 14. Run the sonar.sh script to start SonarQube as the sonar user.
+
+- name: Installing Java and SonarQube Installation
+  hosts: sonarqube # this should match with your inv file in ansible
+  become: true  # Run tasks as a privileged user
+  gather_facts: true  # Collect system facts before running tasks
+  
+  tasks:
+    # Create a sonar user with a home directory
+    - name: Create sonar user
+      ansible.builtin.user:
+        name: "{{item.name}}"
+        create_home: yes  # Ensure the home directory is created
+        state: present  # Ensure the user exists
+      with_items:
+        - {name: sonar, message: sonar_user_created}
+
+    # Add sonar user to the sudoers file with no password prompt
+    - name: Add sonar user to sudoers file
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers  # File to edit
+        state: present
+        regexp: '^%wheel ALL='  # Regular expression to identify the right line
+        line: 'sonar       ALL=(ALL)       NOPASSWD: ALL'  # Grant sonar user sudo privileges without password
+        validate: /usr/sbin/visudo -cf %s  # Validate the sudoers file
+
+    # Download and install Java 17
+    - name: Install java 17
+      ansible.builtin.unarchive:
+        src: https://download.java.net/java/GA/jdk17.0.2/dfd4a8d0985749f896bed50d7138ee7f/8/GPL/openjdk-17.0.2_linux-x64_bin.tar.gz
+        dest: /opt/  # Destination where Java is installed
+        copy: no  # Do not keep a local copy of the archive
+
+    # Download and install Maven 3.8.8
+    - name: Install and configure maven
+      ansible.builtin.unarchive:
+        src: https://dlcdn.apache.org/maven/maven-3/3.8.8/binaries/apache-maven-3.8.8-bin.tar.gz
+        dest: /opt/  # Destination for Maven installation
+        copy: no  # No need to retain the archive
+
+    # Ensure the unzip package is installed
+    - name: Install unzip package
+      apt:
+        name: unzip  # Install unzip package to handle compressed files
+        state: present  # Ensure it’s installed
+      become: yes  # Run as root
+
+    # Download and install SonarQube 9.7.1
+    - name: Install and configure Sonar
+      ansible.builtin.unarchive:
+        src: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-9.7.1.62043.zip
+        dest: /opt/  # SonarQube installation directory
+        copy: no  # Do not keep a local copy of the archive
+
+    # Move Java directory to a simpler path
+    - name: Move directories from src to dest for java
+      ansible.builtin.command: mv /opt/jdk-17.0.2 /opt/jdk17  # Rename the folder
+      args:
+        removes: /opt/jdk-17.0.2  # Remove the old folder after moving
+        creates: /opt/jdk17  # Ensure the target folder exists
+
+    # Move Maven directory to a simpler path
+    - name: Move directory from src to dest for maven
+      ansible.builtin.command: mv /opt/apache-maven-3.8.8 /opt/maven388
+      args:
+        removes: /opt/apache-maven-3.8.8  # Remove the old folder
+        creates: /opt/maven388  # Target folder after moving
+
+    # Move SonarQube directory to a simpler path
+    - name: Move directory from src to dest for Sonar
+      ansible.builtin.command: mv /opt/sonarqube-9.7.1.62043 /opt/sonarqube971
+      args:
+        removes: /opt/sonarqube-9.7.1.62043  # Remove the old folder
+        creates: /opt/sonarqube971  # New folder after moving
+
+    # Add environment variables for Java, Maven, and Sonar
+    - name: Add environment variables to prepare the environment
+      ansible.builtin.blockinfile:
+        path: /etc/profile  # System-wide profile to set environment variables
+        state: present
+        block: |
+          {{ item.env }}
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item.env }}"  # Mark the block for easy identification
+      loop:
+        - {env: 'JAVA_HOME=/opt/jdk17'}
+        - {env: 'PATH=$PATH:$JAVA_HOME/bin'}
+        - {env: 'MAVEN_HOME=/opt/maven388'}
+        - {env: 'PATH=$PATH:$MAVEN_HOME/bin'}
+        - {env: 'SONAR_JAVA_PATH=/opt/jdk17'}
+        - {env: 'PATH=$PATH:$SONAR_JAVA_PATH/bin'}
+
+    # Source /etc/profile to load environment variables in the current session
+    - name: Source /etc/profile to load environment variables
+      ansible.builtin.shell: source /etc/profile
+      args:
+        executable: /bin/bash
+
+    # Set the correct ownership and permissions for SonarQube
+    - name: Change ownership and permissions
+      ansible.builtin.file:
+        path: "{{item.perms}}"  # Path to set ownership
+        owner: sonar  # Set the owner to sonar
+        group: sonar  # Set the group to sonar
+        mode: 0775  # Set the appropriate permissions
+        recurse: true  # Apply recursively to all files and directories
+      loop:
+        - {perms: '/opt/sonarqube971', message: ownership_permissions_updated}
+
+    # Modify the SonarQube script to run as the sonar user
+    - name: Configure SonarQube to run as the sonar user
+      ansible.builtin.lineinfile:
+        path: "/opt/sonarqube971/bin/linux-x86-64/sonar.sh"  # Path to SonarQube start script
+        regexp: "RUN_AS_USER=sonar"  # Ensure the sonar user is used to run the service
+        insertafter: "#RUN_AS_USER="  # Insert after the commented-out line
+        line: "RUN_AS_USER=sonar"  # Enable running as sonar user
+
+    # Copy the Sonar service configuration file to the server
+    - name: Copy Startup Service Script to Remote Server
+      ansible.builtin.template:
+        src: sonar.service  # Local service file template
+        dest: /etc/systemd/system  # Target destination
+        owner: sonar  # Set owner to sonar
+        group: sonar  # Set group to sonar
+        mode: 0755  # Set the appropriate permissions
+
+    # Enable and start the SonarQube service
+    - name: Start Sonar Service
+      ansible.builtin.systemd:
+        name: sonar  # Service name
+        enabled: yes  # Enable on boot
+        state: started  # Ensure the service is started
+        daemon_reload: true  # Reload systemd to apply the changes

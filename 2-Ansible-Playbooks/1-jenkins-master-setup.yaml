@@ -1,0 +1,43 @@
+# This playbook is used to install jenkins and the prerequiste java 
+# Before writing playbook, make sure u are able to communicate(ssh) to jenkins master and slave using private ip, without password
+--- 
+- hosts: jenkins-master # the host on whoich the tasks will be executed
+  become: true # Run the tasks as the root user
+  tasks:
+  - name: Install Java 
+    # apt install openjdk-17-jre
+    apt: 
+      name: openjdk-17-jre
+      update_cache: yes # Update Cache
+  - name: Add Jenkins Key 
+    apt_key:
+      url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+      state: present
+  - name: Add Jenkins Repo
+    apt_repository:
+      repo: 'deb https://pkg.jenkins.io/debian-stable binary/'
+      state: present
+  - name: Install Jenkins
+    apt:
+      name: jenkins
+      state: present
+  - name: Start Jenkins Service
+    service:
+      name: jenkins
+      state: started
+  - name: Enable Jenkins Service
+    service: 
+      name: jenkins
+      enabled: yes
+  - name: Cat the initialAdminPassword file
+    shell: cat /var/lib/jenkins/secrets/initialAdminPassword
+    register: initial_admin_password # Register the output of the previous line command in the variable called initial_admin_password 
+  - name: Display the content of initalAdminPassword
+    debug: # the debug module is used to display debug informantion stored
+    # https://docs.ansible.com/ansible/latest/collections/ansible/builtin/debug_module.html
+      var: initial_admin_password.stdout_lines
+
+
+
+
+

@@ -1,0 +1,106 @@
+# This playbook is used to install the required software on the Jenkins slave node.
+# 
+# TASKS INCLUDED IN THIS PLAYBOOK:
+# 1. Update the Ubuntu package repository.
+# 2. Install Java (openjdk-11-jre).
+# 3. Download Maven packages (version 3.8.8).
+# 4. Extract the downloaded Maven packages to /opt.
+# 5. Download OpenJDK 17 packages.
+# 6. Extract the downloaded OpenJDK 17 packages to /opt.
+# 7. Move the extracted JDK 17 directory to a cleaner path (/opt/jdk-17).
+# 8. Create the Jenkins folder under the specified user’s home directory.
+# 9. Set ownership of Maven and JDK directories to the specified user.
+# 10. Update the apt package cache again.
+
+---
+
+- hosts: jenkins-slave  # The hosts on which the tasks will be executed
+  become: true  # Run the tasks as the root user
+  vars:
+    user_name: krish  # Define the user as a variable
+
+  tasks:  # The tasks to be executed
+    - name: update ubuntu repository  # The name of the task
+      apt:  # The apt module is used to manage packages on Ubuntu
+        update_cache: yes  # Update the package cache
+        cache_valid_time: 3600  # The time in seconds after which the cache is considered outdated
+
+    - name: install java  # The name of the task
+      apt:  # The apt module is used to manage packages on Ubuntu
+        name: openjdk-11-jre  # The name of the package to be installed
+        state: present  # Ensure that the package is present on the system
+
+    - name: download maven packages
+      get_url:  # The get_url module is used to download files from the internet
+        url: https://dlcdn.apache.org/maven/maven-3/3.8.8/binaries/apache-maven-3.8.8-bin.tar.gz  # The URL of the file to be downloaded
+        dest: /opt  # The destination directory where the file will be saved
+
+    - name: extract maven packages
+      unarchive:  # The unarchive module is used to extract archives
+        src: /opt/apache-maven-3.8.8-bin.tar.gz  # The source archive file
+        dest: /opt  # The destination directory where the archive will be extracted
+        remote_src: yes  # Indicates that the source file is on the remote host
+
+    - name: Download OpenJDK 17
+      get_url: 
+        url: https://download.java.net/java/GA/jdk17.0.2/dfd4a8d0985749f896bed50d7138ee7f/8/GPL/openjdk-17.0.2_linux-x64_bin.tar.gz
+        dest: /opt
+
+    - name: extract Java 17 packages
+      unarchive:
+        src: /opt/openjdk-17.0.2_linux-x64_bin.tar.gz
+        dest: /opt
+        remote_src: yes
+
+    - name: Move to jdk-17
+      ansible.builtin.command: mv /opt/jdk-17.0.2 /opt/jdk-17
+      args:
+        creates: /opt/jdk-17
+
+    # Create a Jenkins folder under the user defined by the variable
+    - name: Create the /home/{{ user_name }}/jenkins folder
+      ansible.builtin.file:  # The file module is used to manage files and directories
+        path: /home/{{ user_name }}/jenkins
+        state: directory
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: '0755'  # Set the permissions on the directory
+
+    # Set ownership of Maven and JDK directories to the user defined by the variable
+    - name: Set ownership of /opt/apache-maven-3.8.8 to the user
+      ansible.builtin.file:
+        path: /opt/apache-maven-3.8.8
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        recurse: true  # Ensure ownership is applied recursively
+
+    - name: Set ownership of /opt/jdk-17 to the user
+      ansible.builtin.file:
+        path: /opt/jdk-17
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        recurse: true  # Ensure ownership is applied recursively
+
+    - name: Update apt package cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install Docker
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+    - name: Add user '{{ user_name }}' to the docker group
+      ansible.builtin.user:
+        name: "{{ user_name }}"
+        groups: docker
+        append: yes
+    - name: Set permissions on /var/run/docker.sock
+      ansible.builtin.file:
+        path: /var/run/docker.sock
+        mode: '0777'
+
+    # - name: Install sshpass (for password-based SSH)
+    #   ansible.builtin.apt:
+    #     name: sshpass  # Use 'sshpass' for Ubuntu/Debian systems
+    #     state: present
+    #   when: ansible_os_family == 'Debian'  # Install on Debian-based systems
