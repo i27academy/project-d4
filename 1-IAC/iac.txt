@@ -1,0 +1,5 @@
+gcloud auth application-default login
+
+
+terraform taint google_compute_instance.tf-vm-instance["ansible"]
+terraform taint google_compute_instance.tf-vm-instance["jenkins-master"]
