@@ -1,0 +1,31 @@
+---
+- name: Install and get kubectl version on Jenkins Slaves
+  hosts: jenkins-slave
+  become: yes
+  tasks:
+    - name: Download and install kubectl binary
+      get_url:
+        url: https://dl.k8s.io/release/v1.27.1/bin/linux/amd64/kubectl
+        dest: /usr/local/bin/kubectl
+        mode: '0755'
+
+    - name: Verify kubectl installation
+      stat:
+        path: /usr/local/bin/kubectl
+      register: kubectl_binary
+
+    - name: Add kubectl to PATH
+      lineinfile:
+        path: $HOME/.bashrc
+        line: 'export PATH=$PATH:/usr/local/bin'
+      when: kubectl_binary.stat.exists == True
+
+    - name: Get kubectl version
+      command: kubectl version --client --short
+      register: kubectl_version
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display kubectl version
+      debug:
+        var: kubectl_version.stdout_lines

@@ -1,0 +1,95 @@
+# This playbook performs the following tasks:
+# 1. Updates the apt package cache.
+# 2. Installs Docker on the target machine.
+# 3. Adds a specified Linux user to the Docker group to allow running Docker without sudo.
+# 4. Sets appropriate permissions on the Docker socket for all users.
+# 5. Creates a new user (defined as 'docker_user'), sets a password, and configures SSH for password authentication.
+# 6. Grants the new user sudo privileges by adding them to the sudoers file.
+# 7. Restarts the SSH service to apply configuration changes.
+
+---
+- hosts: dockerserver  # The host group where the tasks will be executed (in this case, SonarQube or Docker server)
+  become: true  # Ensure tasks are executed with elevated privileges (root)
+  
+  vars:
+    linux_user: krish  # Define a variable for an existing Linux user who will be added to the Docker group
+    docker_user: maha  # Define a variable for a new Docker user
+
+  vars_files:
+    - secret_vars.yaml  # Load external variables like passwords from a file (e.g., docker_user_password)
+
+  tasks:
+    # 1. Update the apt package cache to ensure the latest package information is available.
+    - name: Update apt package cache
+      ansible.builtin.apt:
+        update_cache: yes  # Refresh the apt cache
+
+    # 2. Install Docker on the target machine using the apt package manager.
+    - name: Install Docker
+      ansible.builtin.apt:
+        name: docker.io  # The name of the Docker package to install
+        state: present  # Ensure Docker is installed (present)
+
+    # 3. Add the specified Linux user (krish) to the Docker group to allow them to run Docker commands without sudo.
+    - name: Add user '{{ linux_user }}' to the docker group
+      ansible.builtin.user:
+        name: '{{ linux_user }}'  # Add the defined linux_user to the Docker group
+        groups: docker  # The group to which the user will be added
+        append: yes  # Ensure the user is added to the Docker group without removing them from other groups
+
+    # 4. Set full permissions on the Docker socket to allow all users to interact with Docker.
+    - name: Set permissions on /var/run/docker.sock
+      ansible.builtin.file:
+        path: /var/run/docker.sock  # Path to the Docker socket
+        mode: '0777'  # Set full read, write, and execute permissions for all users
+
+    # 5. Create a new user ('maha'), who will be the docker_user, with a home directory and bash shell.
+    - name: Create user '{{ docker_user }}' # Add a new user named 'maha'
+      ansible.builtin.user:
+        name: '{{ docker_user }}'  # Define the username from the docker_user variable
+        createhome: yes  # Create a home directory for the user
+        shell: /bin/bash  # Set the user's default shell to bash
+        system: no  # Create a regular user, not a system user
+        state: present  # Ensure the user is present on the system
+
+    # 6. Set the password for the newly created docker_user using a hashed password from the secret_vars.yaml file.
+    - name: Set the password for user '{{ docker_user }}'
+      ansible.builtin.user:
+        name: '{{ docker_user }}'  # Define the username from the docker_user variable
+        password: "{{ docker_user_password | password_hash('sha512') }}"  # Use the hashed password from the secret_vars.yaml file
+
+    # 7. Enable password-based authentication for SSH connections to allow login with a password.
+    - name: Enable password authentication in SSH
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config  # Path to the SSH configuration file
+        regexp: '^#?PasswordAuthentication'  # Regular expression to find and modify the PasswordAuthentication line
+        line: 'PasswordAuthentication yes'  # Set password authentication to 'yes'
+        backup: yes  # Create a backup of the SSH configuration file before making changes
+    # 10. Comment out the 'Include /etc/ssh/sshd_config.d/*.conf' line in the SSH configuration file
+    - name: Comment out 'Include /etc/ssh/sshd_config.d/*.conf'
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config  # Path to the SSH configuration file
+        regexp: '^Include /etc/ssh/sshd_config.d/\*.conf'  # Regular expression to match the Include line
+        line: '#Include /etc/ssh/sshd_config.d/*.conf'  # Comment out the Include line
+        backup: yes  # Create a backup of the SSH configuration file before making changes
+
+    # 8. Restart the SSH service to apply the changes made to the configuration file.
+    - name: Restart SSH service
+      ansible.builtin.service:
+        name: ssh  # The SSH service
+        state: restarted  # Restart the service to apply the new configuration
+
+    # 9. Add the newly created docker_user (maha) to the sudoers file, granting them sudo privileges.
+    - name: Add '{{ docker_user }}' to the sudoers file
+      ansible.builtin.lineinfile:
+        path: /etc/sudoers  # Path to the sudoers file
+        insertafter: EOF  # Insert the new line at the end of the file
+        line: '{{ docker_user }} ALL=(ALL:ALL) ALL'  # Grant full sudo privileges to the user
+        validate: 'visudo -cf %s'  # Validate the sudoers file for syntax correctness using visudo
+    # 10. Comment out the 'Include /etc/ssh/sshd_config.d/*.conf' line in the SSH configuration file
+    - name: Comment out 'Include /etc/ssh/sshd_config.d/*.conf'
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config  # Path to the SSH configuration file
+        regexp: '^Include /etc/ssh/sshd_config.d/\*.conf'  # Regular expression to match the Include line
+        line: '#Include /etc/ssh/sshd_config.d/*.conf'  # Comment out the Include line
+        backup: yes  # Create a backup of the SSH configuration file before making changes
